@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>NFC Tag Master</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome アイコンライブラリ -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* NFC待機用リングパルスアニメーション */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .pulse-ring {
+      animation: pulse-ring 2s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col font-sans antialiased pb-12 select-none">
+
+  <header class="bg-indigo-600 text-white shadow-md sticky top-0 z-20">
+    <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-2">
+        <i class="fa-solid fa-satellite-dish text-xl"></i>
+        <h1 class="text-lg font-bold tracking-wide">NFC Tag Master</h1>
+      </div>
+      <span id="nfc-badge" class="text-xs px-2.5 py-1 rounded-full font-medium bg-indigo-800 text-indigo-200">
+        チェック中...
+      </span>
+    </div>
+  </header>
+
+  <main class="max-w-md mx-auto w-full px-4 pt-4 flex-1">
+
+    <!-- 非HTTPS環境警告バナー -->
+    <div id="protocol-warning" class="hidden mb-4 p-3 bg-amber-50 border-l-4 border-amber-500 rounded-r-lg text-xs text-amber-800 leading-relaxed shadow-sm">
+      <div class="flex items-start space-x-2">
+        <i class="fa-solid fa-triangle-exclamation mt-0.5 text-amber-600"></i>
+        <div>
+          <strong class="font-bold">HTTPS未検出:</strong> Web NFC APIは暗号化接続 (HTTPS) または localhost でのみ動作します。GitHub Pages等のHTTPS環境でアクセスしてください。
+        </div>
+      </div>
+    </div>
+
+    <!-- 非対応ブラウザ警告バナー -->
+    <div id="support-warning" class="hidden mb-4 p-3 bg-rose-50 border-l-4 border-rose-500 rounded-r-lg text-xs text-rose-800 leading-relaxed shadow-sm">
+      <div class="flex items-start space-x-2">
+        <i class="fa-solid fa-circle-xmark mt-0.5 text-rose-600"></i>
+        <div>
+          <strong class="font-bold">Web NFC非対応環境:</strong> 現在のブラウザではWeb NFC APIが利用できません。Android端末のGoogle Chromeでお試しください。
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2 p-1.5 bg-slate-200 rounded-2xl mb-4 text-sm font-semibold">
+      <button id="tab-write-btn" type="button" onclick="switchTab('write')" class="py-2.5 rounded-xl transition-all shadow bg-white text-indigo-600">
+        <i class="fa-solid fa-pen mr-1"></i> 書き込み
+      </button>
+      <button id="tab-read-btn" type="button" onclick="switchTab('read')" class="py-2.5 rounded-xl transition-all text-slate-600 hover:text-slate-900">
+        <i class="fa-solid fa-book-open mr-1"></i> 読み込み
+      </button>
+    </div>
+
+    <section id="section-write" class="space-y-4">
+      <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5">
+          書き込みデータ種別
+        </label>
+        
+        <!-- 種別選択チップ -->
+        <div class="grid grid-cols-3 gap-2 mb-4">
+          <button type="button" onclick="setDataType('url')" id="chip-url" class="py-2.5 px-2 text-xs font-semibold rounded-xl border border-indigo-600 bg-indigo-50 text-indigo-700 text-center transition">
+            <i class="fa-solid fa-link block mb-1 text-sm"></i> URL
+          </button>
+          <button type="button" onclick="setDataType('text')" id="chip-text" class="py-2.5 px-2 text-xs font-semibold rounded-xl border border-slate-200 bg-slate-50 text-slate-600 text-center transition">
+            <i class="fa-solid fa-font block mb-1 text-sm"></i> テキスト
+          </button>
+          <button type="button" onclick="setDataType('vcard')" id="chip-vcard" class="py-2.5 px-2 text-xs font-semibold rounded-xl border border-slate-200 bg-slate-50 text-slate-600 text-center transition">
+            <i class="fa-solid fa-address-card block mb-1 text-sm"></i> 連絡先
+          </button>
+        </div>
+
+        <!-- URL入力フォーム -->
+        <div id="form-url" class="space-y-2">
+          <label class="block text-sm font-medium text-slate-700" for="input-url">リンク先URL</label>
+          <input type="url" id="input-url" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="https://example.com" value="https://">
+          <p class="text-xs text-slate-400">スマホをかざすと自動的にブラウザでWebサイトが開きます。</p>
+        </div>
+
+        <!-- テキスト入力フォーム -->
+        <div id="form-text" class="space-y-2 hidden">
+          <label class="block text-sm font-medium text-slate-700" for="input-text">テキスト内容</label>
+          <textarea id="input-text" rows="3" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="記録したいテキストを入力"></textarea>
+          <p class="text-xs text-slate-400">メモや管理番号などの平文データをNFCタグに保存します。</p>
+        </div>
+
+        <!-- 連絡先入力フォーム (vCard) -->
+        <div id="form-vcard" class="space-y-3 hidden">
+          <div>
+            <label class="block text-sm font-medium text-slate-700" for="input-name">氏名</label>
+            <input type="text" id="input-name" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="山田 太郎">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700" for="input-phone">電話番号</label>
+            <input type="tel" id="input-phone" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="09012345678">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700" for="input-email">メールアドレス (任意)</label>
+            <input type="email" id="input-email" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="taro@example.com">
+          </div>
+        </div>
+
+        <!-- 書き込みトリガーボタン -->
+        <button id="write-button" type="button" onclick="startNfcWrite()" class="mt-5 w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold py-3.5 px-4 rounded-xl shadow-md transition flex items-center justify-center space-x-2 text-base">
+          <i class="fa-solid fa-satellite-dish"></i>
+          <span>NFCタグに書き込む</span>
+        </button>
+      </div>
+    </section>
+
+    <section id="section-read" class="space-y-4 hidden">
+      <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+        <div class="text-center py-3">
+          <div class="inline-flex items-center justify-center w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 text-2xl mb-2">
+            <i class="fa-solid fa-qrcode"></i>
+          </div>
+          <h2 class="text-base font-bold text-slate-800">タグ内容の読み取り</h2>
+          <p class="text-xs text-slate-500 mt-1">スキャンを開始してタグをスマホの背面に近づけてください。</p>
+        </div>
+
+        <button id="read-button" type="button" onclick="startNfcRead()" class="mt-2 w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold py-3.5 px-4 rounded-xl shadow-md transition flex items-center justify-center space-x-2 text-base">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <span>タグの読み込みを開始</span>
+        </button>
+      </div>
+
+      <!-- 読み取り結果表示エリア -->
+      <div id="read-result-box" class="hidden bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+        <div class="flex items-center justify-between border-b pb-2 border-slate-100">
+          <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">読み取り結果</span>
+          <span id="read-serial" class="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">UID: --</span>
+        </div>
+        <div id="read-records" class="space-y-2.5">
+          <!-- 読み取りレコードが動的に挿入されます -->
+        </div>
+      </div>
+    </section>
+
+    <div id="nfc-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl text-center flex flex-col items-center">
+        <div class="relative w-20 h-20 flex items-center justify-center mb-4">
+          <div class="absolute inset-0 rounded-full bg-indigo-100 pulse-ring"></div>
+          <div class="w-14 h-14 rounded-full bg-indigo-600 text-white flex items-center justify-center text-2xl shadow">
+            <i id="modal-icon" class="fa-solid fa-satellite-dish"></i>
+          </div>
+        </div>
+        <h3 id="modal-title" class="font-bold text-lg text-slate-800 mb-1">タグをかざしてください</h3>
+        <p id="modal-desc" class="text-xs text-slate-500 mb-5 leading-relaxed">
+          スマホの背面上部をNFCタグに密着させてください
+        </p>
+        <button type="button" onclick="cancelNfcSession()" class="text-xs text-slate-600 hover:text-slate-800 py-2.5 px-5 rounded-xl bg-slate-100 hover:bg-slate-200 font-semibold transition">
+          キャンセル
+        </button>
+      </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium z-50 transition-all duration-300 opacity-0 pointer-events-none max-w-sm w-11/12 flex items-center space-x-2">
+      <i id="toast-icon" class="fa-solid fa-circle-check"></i>
+      <span id="toast-message" class="truncate">メッセージ</span>
+    </div>
+
+  </main>
+
+  <script>
+    // 状態管理
+    let currentTab = 'write';
+    let currentDataType = 'url';
+    let abortController = null;
+
+    // 初期化チェック (HTTPS判定およびWeb NFCサポート検証)
+    window.addEventListener('DOMContentLoaded', () => {
+      const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+      if (!isSecure) {
+        document.getElementById('protocol-warning').classList.remove('hidden');
+      }
+
+      const badge = document.getElementById('nfc-badge');
+      if ('NDEFReader' in window) {
+        badge.textContent = 'Web NFC 対応';
+        badge.className = 'text-xs px-2.5 py-1 rounded-full font-medium bg-emerald-800 text-emerald-200';
+      } else {
+        badge.textContent = 'Web NFC 非対応';
+        badge.className = 'text-xs px-2.5 py-1 rounded-full font-medium bg-rose-800 text-rose-200';
+        document.getElementById('support-warning').classList.remove('hidden');
+      }
+    });
+
+    // タブ切り替え処理
+    function switchTab(tab) {
+      currentTab = tab;
+      const writeBtn = document.getElementById('tab-write-btn');
+      const readBtn = document.getElementById('tab-read-btn');
+      const writeSection = document.getElementById('section-write');
+      const readSection = document.getElementById('section-read');
+
+      if (tab === 'write') {
+        writeBtn.className = 'py-2.5 rounded-xl transition-all shadow bg-white text-indigo-600';
+        readBtn.className = 'py-2.5 rounded-xl transition-all text-slate-600 hover:text-slate-900';
+        writeSection.classList.remove('hidden');
+        readSection.classList.add('hidden');
+      } else {
+        readBtn.className = 'py-2.5 rounded-xl transition-all shadow bg-white text-indigo-600';
+        writeBtn.className = 'py-2.5 rounded-xl transition-all text-slate-600 hover:text-slate-900';
+        readSection.classList.remove('hidden');
+        writeSection.classList.add('hidden');
+      }
+    }
+
+    // データ種別切り替え
+    function setDataType(type) {
+      currentDataType = type;
+      const chips = ['url', 'text', 'vcard'];
+      chips.forEach(c => {
+        const chipEl = document.getElementById(`chip-${c}`);
+        const formEl = document.getElementById(`form-${c}`);
+        if (c === type) {
+          chipEl.className = 'py-2.5 px-2 text-xs font-semibold rounded-xl border border-indigo-600 bg-indigo-50 text-indigo-700 text-center transition';
+          formEl.classList.remove('hidden');
+        } else {
+          chipEl.className = 'py-2.5 px-2 text-xs font-semibold rounded-xl border border-slate-200 bg-slate-50 text-slate-600 text-center transition';
+          formEl.classList.add('hidden');
+        }
+      });
+    }
+
+    let toastTimeout = null;
+    function showToast(message, type = 'success') {
+      const toast = document.getElementById('toast');
+      const icon = document.getElementById('toast-icon');
+      const text = document.getElementById('toast-message');
+
+      if (toastTimeout) clearTimeout(toastTimeout);
+      text.textContent = message;
+
+      if (type === 'success') {
+        toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium z-50 transition-all duration-300 opacity-100 bg-emerald-600 text-white max-w-sm w-11/12 flex items-center space-x-2';
+        icon.className = 'fa-solid fa-circle-check';
+      } else if (type === 'error') {
+        toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium z-50 transition-all duration-300 opacity-100 bg-rose-600 text-white max-w-sm w-11/12 flex items-center space-x-2';
+        icon.className = 'fa-solid fa-circle-exclamation';
+      } else {
+        toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium z-50 transition-all duration-300 opacity-100 bg-slate-800 text-white max-w-sm w-11/12 flex items-center space-x-2';
+        icon.className = 'fa-solid fa-circle-info';
+      }
+
+      toastTimeout = setTimeout(() => {
+        toast.classList.replace('opacity-100', 'opacity-0');
+        toast.classList.add('pointer-events-none');
+      }, 3500);
+    }
+
+    function showModal(title, desc) {
+      document.getElementById('modal-title').textContent = title;
+      document.getElementById('modal-desc').textContent = desc;
+      document.getElementById('nfc-modal').classList.remove('hidden');
+    }
+
+    function hideModal() {
+      document.getElementById('nfc-modal').classList.add('hidden');
+    }
+
+    function cancelNfcSession() {
+      if (abortController) {
+        abortController.abort();
+        abortController = null;
+      }
+      hideModal();
+      showToast('NFCセッションをキャンセルしました', 'info');
+    }
+
+    async function startNfcWrite() {
+      if (!('NDEFReader' in window)) {
+        showToast('Web NFC非対応ブラウザです (Android Chrome推奨)', 'error');
+        return;
+      }
+
+      let records = [];
+
+      if (currentDataType === 'url') {
+        const urlVal = document.getElementById('input-url').value.trim();
+        if (!urlVal || !/^https?:\/\//i.test(urlVal)) {
+          showToast('有効なURL (http:// または https://) を入力してください', 'error');
+          return;
+        }
+        records.push({
+          recordType: 'url',
+          data: urlVal
+        });
+      } else if (currentDataType === 'text') {
+        const textVal = document.getElementById('input-text').value.trim();
+        if (!textVal) {
+          showToast('テキストを入力してください', 'error');
+          return;
+        }
+        records.push({
+          recordType: 'text',
+          data: textVal
+        });
+      } else if (currentDataType === 'vcard') {
+        const name = document.getElementById('input-name').value.trim();
+        const phone = document.getElementById('input-phone').value.trim();
+        const email = document.getElementById('input-email').value.trim();
+
+        if (!name || !phone) {
+          showToast('氏名と電話番号を入力してください', 'error');
+          return;
+        }
+
+        let vcardBody = `BEGIN:VCARD\nVERSION:3.0\nFN:${name}\nTEL:${phone}`;
+        if (email) vcardBody += `\nEMAIL:${email}`;
+        vcardBody += `\nEND:VCARD`;
+
+        records.push({
+          recordType: 'mime',
+          mediaType: 'text/vcard',
+          data: vcardBody
+        });
+      }
+
+      abortController = new AbortController();
+      showModal('書き込み待機中', 'NFCタグをスマホの背面にかざしてください');
+
+      try {
+        const ndef = new NDEFReader();
+        await ndef.write({ records }, { signal: abortController.signal });
+        hideModal();
+        showToast('NFCタグへの書き込みが完了しました！', 'success');
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          hideModal();
+          showToast(`書き込み失敗: ${err.message || err}`, 'error');
+        }
+      } finally {
+        abortController = null;
+      }
+    }
+
+    async function startNfcRead() {
+      if (!('NDEFReader' in window)) {
+        showToast('Web NFC非対応ブラウザです (Android Chrome推奨)', 'error');
+        return;
+      }
+
+      abortController = new AbortController();
+      showModal('スキャン待機中', '読み取るNFCタグをスマホ背面にかざしてください');
+
+      try {
+        const ndef = new NDEFReader();
+        await ndef.scan({ signal: abortController.signal });
+
+        ndef.onreading = (event) => {
+          hideModal();
+          showToast('タグを読み取りました！', 'success');
+          renderReadResult(event);
+          if (abortController) {
+            abortController.abort();
+            abortController = null;
+          }
+        };
+
+        ndef.onreadingerror = () => {
+          showToast('タグの読み取りに失敗しました。もう一度かざしてください。', 'error');
+        };
+
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          hideModal();
+          showToast(`読み込みエラー: ${err.message || err}`, 'error');
+        }
+        abortController = null;
+      }
+    }
+
+    function renderReadResult(event) {
+      const box = document.getElementById('read-result-box');
+      const serialEl = document.getElementById('read-serial');
+      const recordsContainer = document.getElementById('read-records');
+
+      serialEl.textContent = event.serialNumber ? `UID: ${event.serialNumber}` : 'UID: 不明';
+      recordsContainer.innerHTML = '';
+
+      const { records } = event.message;
+
+      if (!records || records.length === 0) {
+        recordsContainer.innerHTML = '<p class="text-xs text-slate-400 py-2">データは記録されていません (空のタグ)</p>';
+      } else {
+        records.forEach((record, index) => {
+          const itemDiv = document.createElement('div');
+          itemDiv.className = 'p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5';
+
+          let typeLabel = record.recordType;
+          let content = '';
+
+          try {
+            if (record.recordType === 'text') {
+              const textDecoder = new TextDecoder(record.encoding || 'utf-8');
+              content = textDecoder.decode(record.data);
+              typeLabel = 'テキスト';
+            } else if (record.recordType === 'url') {
+              const textDecoder = new TextDecoder();
+              content = textDecoder.decode(record.data);
+              typeLabel = 'URL';
+            } else if (record.recordType === 'mime') {
+              const textDecoder = new TextDecoder();
+              content = textDecoder.decode(record.data);
+              typeLabel = `MIME (${record.mediaType})`;
+            } else {
+              content = `[バイナリ / 未対応データ: ${record.data ? record.data.byteLength : 0} bytes]`;
+            }
+          } catch (e) {
+            content = '[データデコードエラー]';
+          }
+
+          itemDiv.innerHTML = `
+            <div class="flex items-center justify-between text-xs font-semibold text-slate-500">
+              <span>レコード #${index + 1} (${typeLabel})</span>
+            </div>
+            <div class="text-xs font-mono text-slate-800 break-all bg-white p-2.5 rounded-lg border border-slate-200">
+              ${escapeHtml(content)}
+            </div>
+          `;
+
+          if (record.recordType === 'url' || content.startsWith('http://') || content.startsWith('https://')) {
+            const linkA = document.createElement('a');
+            linkA.href = content;
+            linkA.target = '_blank';
+            linkA.rel = 'noopener noreferrer';
+            linkA.className = 'inline-flex items-center mt-1 text-xs text-indigo-600 font-semibold hover:underline';
+            linkA.innerHTML = '<i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> ブラウザで開く';
+            itemDiv.appendChild(linkA);
+          }
+
+          recordsContainer.appendChild(itemDiv);
+        });
+      }
+
+      box.classList.remove('hidden');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/[&<>"']/g, function(m) {
+        return {
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#039;'
+        }[m];
+      });
+    }
+  </script>
+</body>
+</html>
